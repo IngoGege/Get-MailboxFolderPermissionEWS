@@ -7,7 +7,7 @@ The purpose of the script is to get for each folder granted permissions for give
 
 # Permissions: Either FullAccess or ApplicationImpersonation
 
-#[Exchange Web Services Managed API](http://go.microsoft.com/fwlink/?LinkId=255472)
+# [Exchange Web Services Managed API](http://go.microsoft.com/fwlink/?LinkId=255472)
 
 
 ## Examples
