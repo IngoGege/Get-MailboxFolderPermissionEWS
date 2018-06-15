@@ -110,4 +110,4 @@ Returns only folders with invalid permissions.
 
 ### [The good, the bad and sIDHistory](https://ingogegenwarth.wordpress.com/2015/04/01/the-good-the-bad-and-sidhistory/)
 
-### [Get mailbox folder permissions using EWS multithreading](https://ingogegenwarth.wordpress.com/2015/04/16/get-mailbox-folder-permissions-using-ews-multithreading/)
+[Get mailbox folder permissions using EWS multithreading](https://ingogegenwarth.wordpress.com/2015/04/16/get-mailbox-folder-permissions-using-ews-multithreading/)
