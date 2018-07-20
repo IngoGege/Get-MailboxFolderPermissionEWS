@@ -289,6 +289,10 @@ Process {
             ## Optional section for Exchange Impersonation
             If ($Impersonate) {
                 $service.ImpersonatedUserId = new-object Microsoft.Exchange.WebServices.Data.ImpersonatedUserId([Microsoft.Exchange.WebServices.Data.ConnectingIdType]::SmtpAddress, $MailboxName)
+                If ($Service.HttpHeaders.keys.Contains("X-AnchorMailbox")) {
+                    $Service.HttpHeaders.Remove("X-AnchorMailbox") | Out-Null
+                }
+                $Service.HttpHeaders.Add("X-AnchorMailbox", $MailboxName)
             }
 
             $rootFolderId = new-object Microsoft.Exchange.WebServices.Data.FolderId([Microsoft.Exchange.WebServices.Data.WellKnownFolderName]::$RootFolder,$MailboxName)
