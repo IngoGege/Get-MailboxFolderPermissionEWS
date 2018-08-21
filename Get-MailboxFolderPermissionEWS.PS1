@@ -140,7 +140,10 @@ Param (
     [System.Management.Automation.SwitchParameter]$TrustAnySSL,
 
     [parameter( Mandatory=$false, Position=12)]
-    [System.Management.Automation.SwitchParameter]$SearchUnknownOnly
+    [System.Management.Automation.SwitchParameter]$SearchUnknownOnly,
+
+    [parameter( Mandatory=$false, Position=13)]
+    [System.Management.Automation.SwitchParameter]$ClearUnknown
 
 )
 
@@ -199,8 +202,192 @@ Process {
             [System.Int32]$ProgressID,
 
             [parameter( Mandatory=$false, Position=10)]
-            [System.Boolean]$SearchUnknownOnly
+            [System.Boolean]$SearchUnknownOnly,
+
+            [parameter( Mandatory=$false, Position=11)]
+            [System.Boolean]$ClearUnknown
         )
+
+        function Cleanup-FolderPermission
+        {
+            [CmdletBinding()]
+            Param(
+                [parameter(ValueFromPipelineByPropertyName=$true,Mandatory=$false, Position=0)]
+                [Alias('PrimarySmtpAddress')]
+                $EmailAddress,
+                
+                [parameter(Mandatory=$true, Position=1)]
+                [System.String]$FolderID,
+                
+                [parameter(Mandatory=$true, Position=2)]
+                [System.String]$ChangeKey,
+        
+                [parameter( Mandatory=$false, Position=3)]
+                [System.Management.Automation.PsCredential]$Credentials,
+        
+                [parameter( Mandatory=$false, Position=4)]
+                [System.Boolean]$Impersonate,
+                
+                [parameter( Mandatory=$true, Position=5)]
+                $URL
+
+            )
+
+            Begin
+            {
+                [System.Boolean]$returnValue = $true
+                # SOAP templates
+                $GetFolder = "
+                    <?xml version=`"1.0`" encoding=`"utf-8`"?>
+                      <soap:Envelope xmlns:xsi=`"http://www.w3.org/2001/XMLSchema-instance`" xmlns:m=`"http://schemas.microsoft.com/exchange/services/2006/messages`" xmlns:t=`"http://schemas.microsoft.com/exchange/services/2006/types`" xmlns:soap=`"http://schemas.xmlsoap.org/soap/envelope/`">
+                        <soap:Header>
+                        <t:RequestServerVersion Version=`"Exchange2010_SP2`" />"
+                If ($Impersonate)
+                {
+                    $GetFolder += "
+                        <t:ExchangeImpersonation>
+                            <t:ConnectingSID>
+                            <t:SmtpAddress>$($EmailAddress)</t:SmtpAddress>
+                            </t:ConnectingSID>
+                        </t:ExchangeImpersonation>"
+                }
+
+                $GetFolder += "
+                    </soap:Header>
+                      <soap:Body>
+                      <m:GetFolder>
+                          <m:FolderShape>
+                          <t:BaseShape>IdOnly</t:BaseShape>
+                          <t:AdditionalProperties>
+                              <t:FieldURI FieldURI=`"folder:PermissionSet`" />
+                          </t:AdditionalProperties>
+                          </m:FolderShape>
+                          <m:FolderIds>
+                          <t:FolderId Id=`"$($FolderID)`" ChangeKey=`"$($ChangeKey)`" />
+                          </m:FolderIds>
+                      </m:GetFolder>
+                      </soap:Body>
+                    </soap:Envelope>"
+
+                $Update = "
+                    <?xml version=`"1.0`" encoding=`"utf-8`"?>
+                      <soap:Envelope xmlns:soap=`"http://schemas.xmlsoap.org/soap/envelope/`" xmlns:t=`"http://schemas.microsoft.com/exchange/services/2006/types`">
+                        <soap:Header>
+                        <t:RequestServerVersion Version=`"Exchange2010_SP2`" />"
+
+                If ($Impersonate)
+                {
+                    $Update += "
+                        <t:ExchangeImpersonation>
+                            <t:ConnectingSID>
+                            <t:SmtpAddress>$($EmailAddress)</t:SmtpAddress>
+                            </t:ConnectingSID>
+                        </t:ExchangeImpersonation>"
+                }
+
+                $Update += "
+                    </soap:Header>
+                      <soap:Body>
+                        <UpdateFolder xmlns=`"http://schemas.microsoft.com/exchange/services/2006/messages`" xmlns:t=`"http://schemas.microsoft.com/exchange/services/2006/types`">
+                          <FolderChanges>
+                            <t:FolderChange>
+                              <t:FolderId Id=`"$($FolderID)`" ChangeKey=`"$ChangeKey`"/>
+                              <t:Updates>
+                                <t:SetFolderField>
+                                <t:FieldURI FieldURI=`"folder:PermissionSet`"/>
+                                  <t:FolderType>
+                                    <t:Bla>
+                                    </t:Bla>
+                                  </t:FolderType>
+                                </t:SetFolderField>
+                              </t:Updates>
+                            </t:FolderChange>
+                          </FolderChanges>
+                        </UpdateFolder>
+                      </soap:Body>
+                    </soap:Envelope>"
+
+            }
+            Process
+            {
+                try{
+                    $GetParams = @{
+                        Uri = $Url
+                        Method = 'Post'
+                        Body = $($GetFolder.TrimStart())
+                        ContentType = 'text/xml'
+                        Verbose = $false
+                    }
+
+                    $Headers = @{}
+
+                    if ($Credentials)
+                    {
+                        $CredString = "$($Credentials.UserName.ToString()):$($Credentials.GetNetworkCredential().password.ToString())"
+                        $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($CredString))
+                        $Headers.Add('Authorization',"Basic $($encodedCreds)")
+                    }
+
+                    #query folder
+                    $Headers.Add('Accept','application/xml')
+                    $Headers.Add('Accept-Encoding','gzip,deflate')
+                    $GetParams.Add('Headers',$Headers)
+                    [XML]$GetResp = (Invoke-WebRequest @GetParams).Content
+
+                    if (-not [System.String]::IsNullOrEmpty($GetResp))
+                    {
+                        #query response for PermissionSet
+                        $root = $GetResp.get_DocumentElement()
+                        $NamespaceURI = "http://schemas.microsoft.com/exchange/services/2006/types"
+                        $ns = New-Object System.Xml.XmlNamespaceManager($GetResp.NameTable)
+                        $ns.AddNameSpace("ns",$NamespaceURI)
+                        $XPath  = "//PermissionSet"
+                        $XPath = $XPath -replace "/(?!/)", "/ns:"
+                        $PermNode = $root.SelectSingleNode($XPath,$ns)
+
+                        if ($PermNode)
+                        {
+                            #replace FolderType with the current type
+                            $type = $GetResp.Envelope.Body.GetFolderResponse.ResponseMessages.GetFolderResponseMessage.Folders.ChildNodes.LocalName
+                            $Update = $Update.Replace('FolderType',$type)
+                            #convert to XML
+                            [xml]$Update = $Update.TrimStart()
+                            #import PermissionSet XML node
+                            $Update.Envelope.Body.UpdateFolder.FolderChanges.FolderChange.Updates.SetFolderField.$type.AppendChild($Update.ImportNode($root.SelectSingleNode($XPath,$ns),$true)) | Out-Null
+                            #remove helper XML node
+                            $updateRoot = $Update.get_DocumentElement()
+                            $NamespaceURI = "http://schemas.microsoft.com/exchange/services/2006/types"
+                            $ns = New-Object System.Xml.XmlNamespaceManager($update.NameTable)
+                            $ns.AddNameSpace("ns",$NamespaceURI)
+                            $BlaNode = $updateRoot.SelectSingleNode("//ns:Bla",$ns)
+                            $UnknownEntries = $updateRoot.SelectSingleNode("//ns:UnknownEntries",$ns)
+                            $BlaNode.get_ParentNode().RemoveChild($BlaNode) | Out-Null
+                            $UnknownEntries.get_ParentNode().RemoveChild($UnknownEntries) | Out-Null
+
+                            $UpdateParams = @{
+                                Uri = $Url
+                                Method = 'Post'
+                                Body = $Update
+                                ContentType = 'text/xml'
+                                Verbose = $false
+                            }
+
+                            $UpdateParams.Add('Headers',$Headers)
+                            $UpdatePost = Invoke-WebRequest @UpdateParams
+                        }
+                        
+                    }
+                }
+                catch{
+                    Write-Verbose "Error occured while clearing UnknownEntries"
+                    $returnValue = $false
+                }
+            }
+            End
+            {
+                $returnValue
+            }
+        }
 
         try {
             $MailboxName = $EmailAddress
@@ -497,7 +684,7 @@ Process {
                                 }
                             }
                         }
-                        ElseIf ($SearchUnknownOnly){
+                        ElseIf ($SearchUnknownOnly -or $ClearUnknown){
                             ForEach ($Unknown in $Folder.Permissions.UnknownEntries) {
                                 $data = new-object PSObject
                                 $data | add-member -type NoteProperty -Name Mailbox -Value $MailboxName
@@ -505,10 +692,33 @@ Process {
                                 $data | add-member -type NoteProperty -Name FolderName -Value $Folder.DisplayName
                                 $data | add-member -type NoteProperty -Name FolderType -Value $Folder.FolderClass
                                 $data | add-member -type NoteProperty -Name FolderPath -Value $fpath
-                                $data | add-member -type NoteProperty -Name EwsID -Value $Folder.ID
+                                $data | add-member -type NoteProperty -Name EwsID -Value $Folder.ID.UniqueId
+                                $data | add-member -type NoteProperty -Name EwsChangeKey -Value $Folder.ID.ChangeKey
                                 $data | add-member -type NoteProperty -Name StoreID -Value ($service.ConvertId($alternateID,'StoreID')).UniqueId
                                 $data | add-member -type NoteProperty -Name HexEntryID -Value ($service.ConvertId($alternateID,'HexEntryId')).UniqueId
                                 $objcol += $data
+                            }
+
+                            If ($ClearUnknown -and (($Folder.Permissions.UnknownEntries).Count -gt 0)) {
+                                $FolderPermissionParams = @{
+                                    EmailAddress = $MailboxName
+                                    FolderID = $Folder.ID.UniqueId
+                                    ChangeKey = $Folder.ID.ChangeKey
+                                    Impersonate = $Impersonate
+                                    URL = $service.Url
+                                    Verbose = $VerbosePreference
+                                }
+                                If ($Credentials) {
+                                    $FolderPermissionParams.Add('Credential',$Credentials)
+                                }
+                                #$ResultValue = Cleanup-FolderPermission -EmailAddress $MailboxName -FolderID $Folder.ID.UniqueId -ChangeKey $Folder.ID.ChangeKey -Credentials $creds -Impersonate $Impersonate -URL $service.Url
+                                $ResultValue = Cleanup-FolderPermission @FolderPermissionParams
+                                If ($ResultValue) {
+                                    Write-Verbose "Succesfully cleaned folder $($Folder.DisplayName)"
+                                }
+                                Else {
+                                    Write-Verbose "Couldn't clean folder $($Folder.DisplayName)with UnknownEntry $($Folder.Permissions.UnknownEntries[0])"
+                                }
                             }
                         }
                         Else {
@@ -594,6 +804,9 @@ Process {
                 }
                 If ($SearchUnknownOnly) {
                     $PowershellThread.AddParameter('SearchUnknownOnly',$SearchUnknownOnly) | Out-Null
+                }
+                If ($ClearUnknown) {
+                    $PowershellThread.AddParameter('ClearUnknown',$ClearUnknown) | Out-Null
                 }
                 $PowershellThread.AddParameter('UseMrMapi',$UseMrMapi) | Out-Null
                 $PowershellThread.AddParameter('TrustAnySSL',$TrustAnySSL) | Out-Null

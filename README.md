@@ -104,6 +104,10 @@ Switch to trust any certificate.
 
 Returns only folders with invalid permissions.
 
+### -ClearUnknown
+
+Will remove UnknownEntries using SOAP
+
 ## Links
 
 ### [Exchange Online migration and TooManyBadItemsPermanetException](https://ingogegenwarth.wordpress.com/2018/06/15/exo-mig-invalidperm/)
