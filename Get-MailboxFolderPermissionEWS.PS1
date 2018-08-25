@@ -327,6 +327,10 @@ Process {
                         $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($CredString))
                         $Headers.Add('Authorization',"Basic $($encodedCreds)")
                     }
+                    else
+                    {
+                        $GetParams.Add('UseDefaultCredentials',$true)
+                    }
 
                     #query folder
                     $Headers.Add('Accept','application/xml')
@@ -373,6 +377,11 @@ Process {
                             }
 
                             $UpdateParams.Add('Headers',$Headers)
+                            if (-not $Credentials)
+                            {
+                                $UpdateParams.Add('UseDefaultCredentials',$true)
+                            }
+
                             $UpdatePost = Invoke-WebRequest @UpdateParams
                         }
                         
